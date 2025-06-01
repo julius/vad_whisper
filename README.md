@@ -1,6 +1,8 @@
 # VAD + Whisper
 Dictate Text with In-Browser Voice Activation Detector and OpenAI Whisper Transcription. Single HTML.
 
+https://julius.github.io/vad_whisper/
+
 Features:
 - Transcribe what you say
 - Copy Text button
