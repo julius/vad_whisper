@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Speech to Text</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #ece9e6, #ffffff);
+        color: #333;
+        display: flex;
+        justify-content: center;
+      }
+
+      .container {
+        margin-top: 40px;
+        width: 100%;
+        max-width: 800px;
+        padding: 0 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      #textarea {
+        width: 100%;
+        height: 220px;
+        padding: 14px;
+        border-radius: 12px;
+        font-size: 16px;
+        resize: vertical;
+        border: none;
+        background: #f5f8fa;
+        color: #222;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .bottom-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+      }
+
+      #startStop {
+        padding: 10px 20px;
+        font-size: 16px;
+        border: none;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #4facfe, #0087cb);
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        transition: transform 0.1s ease;
+      }
+
+      #startStop:active {
+        transform: scale(0.96);
+      }
+
+      #toChatGPT {
+        padding: 10px 20px;
+        font-size: 16px;
+        border: 1px solid #bbb;
+        border-radius: 8px;
+        background: #f2f2f2;
+        color: #333;
+        font-weight: normal;
+        cursor: pointer;
+        box-shadow: none;
+        transition: background 0.2s ease;
+      }
+      #toChatGPT:hover {
+        background: #e0e0e0;
+      }
+      #toChatGPT:active {
+        background: #d0d0d0;
+      }
+
+      .copy-icon {
+        position: absolute;
+        top: 10px;
+        right: -18px;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        opacity: 0.7;
+        transition: opacity 0.2s ease;
+      }
+      .copy-icon:hover {
+        opacity: 1;
+      }
+      .textarea-wrapper {
+        position: relative;
+      }
+
+      .indicator-wrapper {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        margin-right: 4px;
+      }
+
+      .indicator-bg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 34px;
+        height: 34px;
+        border-radius: 6px;
+        animation: rotate 1s linear infinite;
+      }
+
+      .indicator-fg {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 30px;
+        height: 30px;
+        border-radius: 4px;
+        animation: rotate 1s linear infinite;
+        transition: all 0.6s ease;
+        box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+      }
+      .indicator-fg.off {
+        background: #ccc;
+        animation: none;
+      }
+      .indicator-fg.on {
+        background: linear-gradient(135deg, #4facfe, #26a8ff);
+        animation: rotate 4s linear infinite;
+      }
+      .indicator-fg.speaking {
+        background: linear-gradient(135deg, #99ff00, #00e695);
+        animation: rotate 1s linear infinite;
+      }
+
+      .indicator-bg.off {
+        background: transparent;
+      }
+      .indicator-bg.processing {
+        background: linear-gradient(
+          45deg,
+          rgba(255, 13, 13, 0.3),
+          rgba(255, 89, 0, 0.3)
+        );
+        animation: rotate 3s linear infinite;
+      }
+
+      @keyframes rotate {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      #apikeyToggle {
+        background: none;
+        border: none;
+        color: #007bff;
+        cursor: pointer;
+        text-decoration: underline;
+        font-size: 14px;
+      }
+
+      #apikeyContainer {
+        display: none;
+        margin-top: 10px;
+      }
+
+      details summary {
+        list-style: none;
+      }
+      details summary::-webkit-details-marker {
+        display: none;
+      }
+      details[open] summary::before {
+        content: "▼ ";
+      }
+      details:not([open]) summary::before {
+        content: "▶ ";
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="textarea-wrapper">
+        <textarea
+          id="textarea"
+          placeholder="Speech will appear here..."
+          readonly
+        ></textarea>
+        <div class="copy-icon" id="copyText" title="Kopieren">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#444"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </div>
+      </div>
+      <div class="bottom-bar">
+        <button id="startStop">Start</button>
+        <button id="toChatGPT">→ ChatGPT</button>
+
+        <div class="indicator-wrapper">
+          <div id="whisperStatus" class="indicator-bg off"></div>
+          <div id="vadStatus" class="indicator-fg off"></div>
+        </div>
+      </div>
+      <div id="apikeyBox">
+        <details id="apikeyDetails">
+          <summary style="cursor: pointer; font-size: 14px">API-Key</summary>
+          <div style="margin-top: 10px">
+            <input
+              type="text"
+              id="apikey"
+              placeholder="Enter OpenAI API key..."
+              style="
+                width: 100%;
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid #ccc;
+                background: #fff;
+                color: #333;
+                box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+              "
+            />
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <script>
+      let vadInstance = null;
+      let running = false;
+
+      function debug(msg) {
+        console.log(`[${new Date().toISOString()}] ${msg}`);
+      }
+
+      // --- API KEY -------------------------------------------------------------------------------------------------
+      function saveAPIKey(key) {
+        localStorage.setItem("OPENAI_KEY", key);
+        debug("API key saved to localStorage");
+      }
+
+      function getAPIKey() {
+        return localStorage.getItem("OPENAI_KEY");
+      }
+
+      function getBoxState() {
+        return localStorage.getItem("APIKEY_BOX_STATE");
+      }
+
+      function saveBoxState(open) {
+        localStorage.setItem("APIKEY_BOX_STATE", open ? "open" : "closed");
+      }
+
+      document.getElementById("apikey").addEventListener("input", () => {
+        const val = document.getElementById("apikey").value.trim();
+        if (val) saveAPIKey(val);
+      });
+
+      document
+        .getElementById("apikeyDetails")
+        .addEventListener("toggle", (e) => {
+          saveBoxState(e.target.open);
+        });
+
+      window.onload = () => {
+        const savedKey = getAPIKey();
+        if (savedKey) document.getElementById("apikey").value = savedKey;
+
+        const savedState = getBoxState();
+        const details = document.getElementById("apikeyDetails");
+        if (savedState === "closed") {
+          details.removeAttribute("open");
+        } else {
+          details.setAttribute("open", "");
+        }
+      };
+
+      // --- ChatGPT -------------------------------------------------------------------------------------------------
+      document.getElementById("toChatGPT").onclick = () => {
+        const text = document.getElementById("textarea").value.trim();
+        if (text) {
+          const encoded = encodeURIComponent(text);
+          window.open("https://chatgpt.com/?q=" + encoded, "_blank");
+        }
+      };
+
+      // --- Copy -------------------------------------------------------------------------------------------------
+      document.getElementById("copyText").onclick = () => {
+        const textarea = document.getElementById("textarea");
+        navigator.clipboard.writeText(textarea.value);
+      };
+
+      // --- VAD + Whisper -------------------------------------------------------------------------------------------------
+      function setStatus(id, state) {
+        const el = document.getElementById(id);
+        el.className = el.className
+          .replace(/(off|on|speaking|processing)/g, "")
+          .trim();
+        el.classList.add(state);
+      }
+
+      async function initVAD() {
+        vadInstance = await vad.MicVAD.new({
+          onSpeechStart: () => {
+            debug("Speech start detected");
+            setStatus("vadStatus", "speaking");
+          },
+          onSpeechEnd: async (audio) => {
+            debug("Speech end detected");
+            setStatus("vadStatus", "on");
+
+            const OPENAI_KEY = getAPIKey();
+            if (!OPENAI_KEY) {
+              debug("No API key available");
+              return;
+            }
+
+            const wavBuffer = vad.utils.encodeWAV(audio);
+            const blob = new Blob([wavBuffer], { type: "audio/wav" });
+            const formData = new FormData();
+            formData.append("file", blob, "speech.wav");
+            formData.append("model", "whisper-1");
+
+            setStatus("whisperStatus", "processing");
+            debug("Sending audio to OpenAI Whisper...");
+
+            try {
+              const response = await fetch(
+                "https://api.openai.com/v1/audio/transcriptions",
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: "Bearer " + OPENAI_KEY,
+                  },
+                  body: formData,
+                }
+              );
+
+              if (!response.ok) {
+                debug("API error: " + response.statusText);
+                setStatus("whisperStatus", "off");
+                return;
+              }
+
+              const data = await response.json();
+              debug("Transcription received");
+              document.getElementById("textarea").value += data.text + " ";
+            } catch (err) {
+              debug("Fetch error: " + err.message);
+            } finally {
+              setStatus("whisperStatus", "off");
+            }
+          },
+        });
+      }
+
+      async function startVAD() {
+        if (!vadInstance) await initVAD();
+        await vadInstance.start();
+        setStatus("vadStatus", "on");
+        debug("VAD started");
+      }
+
+      async function stopVAD() {
+        if (vadInstance) await vadInstance.pause();
+        setStatus("vadStatus", "off");
+        debug("VAD paused");
+      }
+
+      document.getElementById("startStop").onclick = async () => {
+        if (running) {
+          await stopVAD();
+          document.getElementById("startStop").textContent = "Start";
+          running = false;
+        } else {
+          await startVAD();
+          document.getElementById("startStop").textContent = "Pause";
+          running = true;
+        }
+      };
+    </script>
+  </body>
+</html>
